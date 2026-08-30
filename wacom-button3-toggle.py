@@ -13,7 +13,7 @@ import evdev
 DEVICE_GLOB_NAME = "usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse"
 BY_ID_PATH = f"/dev/input/by-id/{DEVICE_GLOB_NAME}"
 
-KEY_CYCLE = ["e", "w", "l"]
+KEY_CYCLE = ["e", "p", "h", "l"]  # eraser, pen, highlight, laser
 
 
 def find_device_path():
