@@ -154,6 +154,32 @@ Verified via `journalctl -f` against the literal sequence
 against the state machine and confirmed to match exactly, output for
 output.
 
+## 5.2 Swapping which physical button does which job
+
+After using the setup for a while, the user found the tool-switching
+button (originally the upper barrel, Button 3) less comfortable to reach
+than the lower barrel button (Button 2, originally bound to `pan`).
+Swapped them: Button 2 → tool-switching daemon, Button 3 → `pan`.
+
+This touched every layer that had a button-number baked in:
+`wacom-button3-toggle.py` (evdev code `BTN_STYLUS2` → `BTN_STYLUS`, plus
+log/comment text), `.xprofile` and `wacom-watch.sh` (which
+xsetwacom-disables vs which gets `pan`), the systemd service
+`Description=`, and the README. The Python file itself was **not**
+renamed (`wacom-button3-toggle.py` still does the tool-switching, just on
+Button 2 now) — renaming it would mean updating the systemd unit's
+`ExecStart` path too, and `install.sh`'s copy step, for purely cosmetic
+gain; the file's docstring/comments make the actual button clear instead.
+
+**Learning**: a hardcoded button/evdev-code mapping like this benefits
+from being named after *what it does* (`wacom-button3-toggle.py`) rather
+than needing a rename every time the physical assignment changes — but
+only up to a point; if this project grows more button reassignments, a
+config constant at the top of the file (`WATCH_CODE = evdev.ecodes.BTN_STYLUS`)
+would be a cleaner single point of truth than a name that's now
+technically inaccurate. Not worth doing for a two-button swap; would be
+worth doing before a third.
+
 ## 6. General workflow notes
 
 - Every persistence layer (`.xprofile`, `wacom-watch.service`) was

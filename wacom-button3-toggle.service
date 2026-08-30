@@ -1,5 +1,5 @@
 [Unit]
-Description=Wacom stylus Button 3: short press toggles pen/eraser, long press toggles highlight/laser
+Description=Wacom stylus Button 2: short press toggles pen/eraser, long press toggles highlight/laser
 After=graphical-session.target
 
 [Service]

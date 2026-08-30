@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-# Wacom stylus upper barrel button (BTN_STYLUS2, xsetwacom "Button 3") drives two
+# Wacom stylus lower barrel button (BTN_STYLUS, xsetwacom "Button 2") drives two
 # independent tool families based on press duration: short press = pen/eraser,
 # long press = highlight/laser. Switching families (e.g. short after a long)
 # resumes whichever tool that family was last on; alternating within a family
 # (p<->e or h<->l) only happens on consecutive presses of the same length.
 # xsetwacom can't do stateful or duration-based bindings, so this reads the raw
 # evdev press/release events directly and sends the keystroke via xdotool.
-# xsetwacom Button 3 must stay disabled (set to 0) so the tablet driver doesn't
-# also fire its own right-click on the same press.
+# xsetwacom Button 2 must stay disabled (set to 0) so the tablet driver doesn't
+# also fire its own click on the same press. Button 3 (upper barrel) now holds
+# pan instead - swapped from the original layout because the lower barrel
+# button is easier to reach for tool switching.
 import os
 import subprocess
 import time
@@ -45,7 +47,7 @@ def watch(path, state):
     dev = evdev.InputDevice(path)
     press_time = None
     for event in dev.read_loop():
-        if event.type != evdev.ecodes.EV_KEY or event.code != evdev.ecodes.BTN_STYLUS2:
+        if event.type != evdev.ecodes.EV_KEY or event.code != evdev.ecodes.BTN_STYLUS:
             continue
         if event.value == 1:  # press
             press_time = event.timestamp()
@@ -64,7 +66,7 @@ def watch(path, state):
             key = cycle[state[label]]
             send_key(key)
             print(
-                f"{time.strftime('%FT%T')} Button 3 {label} press ({duration:.2f}s) -> sent '{key}'",
+                f"{time.strftime('%FT%T')} Button 2 {label} press ({duration:.2f}s) -> sent '{key}'",
                 flush=True,
             )
             state["last_family"] = label

@@ -13,9 +13,9 @@ export DISPLAY="$DISPLAY_VAL" XAUTHORITY="$XAUTH_VAL"
 apply() {
     for i in $(seq 1 10); do
         if xsetwacom --list devices 2>/dev/null | grep -q "$DEVICE_NAME"; then
-            xsetwacom --set "$DEVICE_NAME" Button 2 "pan"
-            xsetwacom --set "$DEVICE_NAME" Button 3 0
-            echo "$(date -Is) reapplied Button 2 -> pan, Button 3 -> disabled (toggle daemon handles it)"
+            xsetwacom --set "$DEVICE_NAME" Button 2 0
+            xsetwacom --set "$DEVICE_NAME" Button 3 "pan"
+            echo "$(date -Is) reapplied Button 2 -> disabled (toggle daemon handles it), Button 3 -> pan"
             return
         fi
         sleep 1
