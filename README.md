@@ -11,6 +11,20 @@ Actual button layout on this device (confirmed via `xsetwacom --get`/`xinput`):
 
 Goal: both bindings survive reboots and tablet unplug/replug.
 
+## Install (fresh machine)
+
+Requires `python3-evdev` and `xdotool`, and the user in the `input` group
+(`sudo usermod -aG input $USER`, then re-login).
+
+```bash
+./install.sh
+```
+
+This copies the scripts/units into `~/.local/bin` and
+`~/.config/systemd/user`, appends the `.xprofile` snippet if not already
+present, and enables both systemd user services. Safe to re-run after
+pulling changes to this repo.
+
 ## Live files (these are what actually run — copies here are for reference)
 
 | Purpose | Live path | Copy in this dir |
