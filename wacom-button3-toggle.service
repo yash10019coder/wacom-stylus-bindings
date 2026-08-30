@@ -1,5 +1,5 @@
 [Unit]
-Description=Toggle Wacom stylus upper barrel button (Button 3) between e/w
+Description=Cycle Wacom stylus upper barrel button (Button 3) through e/p/h/l
 After=graphical-session.target
 
 [Service]
