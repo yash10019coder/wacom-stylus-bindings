@@ -1,4 +1,12 @@
-# Wacom One M — button bindings & persistence
+# Wacom One M — button bindings & persistence for GoodNotes Web
+
+Built and tuned specifically for **[GoodNotes Web](https://www.goodnotes.com/)**
+on Linux (Chrome/Chromium), where `p`/`e`/`h`/`l` are GoodNotes' own
+keyboard shortcuts for Pen, Eraser, Highlighter, and Laser pointer. The
+approach (raw evdev + `xdotool`) is not GoodNotes-specific and will send
+these same keys to whatever app has focus, so it should adapt to any app
+with keyboard shortcuts for its tools — just change `SHORT_CYCLE`/
+`LONG_CYCLE` in `wacom-button3-toggle.py` to that app's shortcut keys.
 
 Device: `Wacom One by Wacom M Pen stylus` (2 barrel buttons + tip).
 
