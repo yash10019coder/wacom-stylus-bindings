@@ -1,5 +1,5 @@
 [Unit]
-Description=Cycle Wacom stylus upper barrel button (Button 3) through e/p/h/l
+Description=Wacom stylus Button 3: short press toggles pen/eraser, long press toggles highlight/laser
 After=graphical-session.target
 
 [Service]
