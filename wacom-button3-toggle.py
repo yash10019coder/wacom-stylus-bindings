@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # Wacom stylus upper barrel button (BTN_STYLUS2, xsetwacom "Button 3") drives two
-# independent tool cycles based on press duration: a short press advances the
-# frequent-tools cycle (pen/eraser), a long press advances the occasional-tools
-# cycle (highlight/laser). xsetwacom can't do stateful or duration-based
-# bindings, so this reads the raw evdev press/release events directly and sends
-# the keystroke via xdotool. xsetwacom Button 3 must stay disabled (set to 0) so
-# the tablet driver doesn't also fire its own right-click on the same press.
+# independent tool families based on press duration: short press = pen/eraser,
+# long press = highlight/laser. Switching families (e.g. short after a long)
+# resumes whichever tool that family was last on; alternating within a family
+# (p<->e or h<->l) only happens on consecutive presses of the same length.
+# xsetwacom can't do stateful or duration-based bindings, so this reads the raw
+# evdev press/release events directly and sends the keystroke via xdotool.
+# xsetwacom Button 3 must stay disabled (set to 0) so the tablet driver doesn't
+# also fire its own right-click on the same press.
 import os
 import subprocess
 import time
@@ -50,21 +52,26 @@ def watch(path, state):
         elif event.value == 0 and press_time is not None:  # release
             duration = event.timestamp() - press_time
             press_time = None
-            if duration < LONG_PRESS_THRESHOLD_S:
-                cycle, idx_key, label = SHORT_CYCLE, "short", "short"
-            else:
-                cycle, idx_key, label = LONG_CYCLE, "long", "long"
-            key = cycle[state[idx_key]]
+            label = "short" if duration < LONG_PRESS_THRESHOLD_S else "long"
+            cycle = SHORT_CYCLE if label == "short" else LONG_CYCLE
+
+            if state["last_family"] == label:
+                # Same family as the previous press: alternate within it.
+                state[label] = (state[label] + 1) % len(cycle)
+            # else: switching families - resume this family's current tool
+            # (its index is untouched since the last time it was used).
+
+            key = cycle[state[label]]
             send_key(key)
             print(
                 f"{time.strftime('%FT%T')} Button 3 {label} press ({duration:.2f}s) -> sent '{key}'",
                 flush=True,
             )
-            state[idx_key] = (state[idx_key] + 1) % len(cycle)
+            state["last_family"] = label
 
 
 def main():
-    state = {"short": 0, "long": 0}
+    state = {"short": 0, "long": 0, "last_family": None}
     while True:
         path = find_device_path()
         if path is None:

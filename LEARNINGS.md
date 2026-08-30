@@ -131,6 +131,29 @@ fragility for a "nice to have." Left as a known gap, revisit if GoodNotes
 ships the shortcut, or if the user decides the coordinate-click hack is
 worth the maintenance cost after all.
 
+## 5.1 Family-switch memory vs blind advancing
+
+After the short/long split shipped, a subtler bug surfaced: each family's
+index was a pointer to "what to send *next*", which silently advanced
+every time that family was used — including across an intervening press
+of the *other* family. So if long-press last gave `h`, then you did a few
+short presses (pen/eraser), the *next* long press gave `l` — not because
+you'd asked to move on from `h`, but because the pointer had already
+quietly advanced past it during the short-press activity.
+
+The fix: track, per family, the tool it is *currently sitting on* (not
+"next to send"), plus one shared `last_family` flag. On each press:
+switching families (current press's family differs from `last_family`)
+just re-sends that family's current tool, unchanged. Only a press of the
+**same** family as the previous press advances that family's index. This
+matches the intuitive mental model — "the highlighter tool doesn't move
+around behind my back just because I used the eraser for a while."
+
+Verified via `journalctl -f` against the literal sequence
+`p e p e h l e l h l e l` requested during testing — traced by hand
+against the state machine and confirmed to match exactly, output for
+output.
+
 ## 6. General workflow notes
 
 - Every persistence layer (`.xprofile`, `wacom-watch.service`) was
