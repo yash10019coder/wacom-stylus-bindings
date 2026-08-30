@@ -1,0 +1,13 @@
+[Unit]
+Description=Toggle Wacom stylus upper barrel button (Button 3) between e/w
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/ubuntu/.local/bin/wacom-button3-toggle.py
+Restart=on-failure
+RestartSec=3
+Environment=DISPLAY=:1
+Environment=XAUTHORITY=/run/user/1000/gdm/Xauthority
+
+[Install]
+WantedBy=default.target

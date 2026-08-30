@@ -1,0 +1,13 @@
+[Unit]
+Description=Reapply Wacom stylus button bindings on tablet reconnect
+After=graphical-session.target
+
+[Service]
+ExecStart=/home/ubuntu/.local/bin/wacom-watch.sh
+Restart=on-failure
+RestartSec=3
+Environment=DISPLAY=:1
+Environment=XAUTHORITY=/run/user/1000/gdm/Xauthority
+
+[Install]
+WantedBy=default.target
