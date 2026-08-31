@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# Wacom stylus lower barrel button (BTN_STYLUS, xsetwacom "Button 2") drives two
-# independent tool families based on press duration: short press = pen/eraser,
-# long press = highlight/laser. Switching families (e.g. short after a long)
-# resumes whichever tool that family was last on; alternating within a family
-# (p<->e or h<->l) only happens on consecutive presses of the same length.
+# Wacom stylus lower barrel button (BTN_STYLUS, xsetwacom "Button 2") drives a
+# 2x2 grid of tools: TYPE (pen-family vs highlight-family) x CLASS (normal vs
+# eraser-analog). Short press flips CLASS only (p<->e, h<->l) regardless of
+# which type is active. Long press flips TYPE only (p<->h, e<->l), keeping
+# the current class. So e.g. from "p": short -> e, long -> h; from "h":
+# short -> l, long -> p.
 # xsetwacom can't do stateful or duration-based bindings, so this reads the raw
 # evdev press/release events directly and sends the keystroke via xdotool.
 # xsetwacom Button 2 must stay disabled (set to 0) so the tablet driver doesn't
@@ -19,8 +20,14 @@ import evdev
 DEVICE_GLOB_NAME = "usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse"
 BY_ID_PATH = f"/dev/input/by-id/{DEVICE_GLOB_NAME}"
 
-SHORT_CYCLE = ["p", "e"]  # pen, eraser
-LONG_CYCLE = ["h", "l"]  # highlight, laser
+# (type, class) -> key. type 0 = pen-family, 1 = highlight-family.
+# class 0 = normal (p/h), 1 = alt (e/l).
+TOOL_GRID = {
+    (0, 0): "p",
+    (0, 1): "e",
+    (1, 0): "h",
+    (1, 1): "l",
+}
 LONG_PRESS_THRESHOLD_S = 0.35
 
 
@@ -55,25 +62,22 @@ def watch(path, state):
             duration = event.timestamp() - press_time
             press_time = None
             label = "short" if duration < LONG_PRESS_THRESHOLD_S else "long"
-            cycle = SHORT_CYCLE if label == "short" else LONG_CYCLE
 
-            if state["last_family"] == label:
-                # Same family as the previous press: alternate within it.
-                state[label] = (state[label] + 1) % len(cycle)
-            # else: switching families - resume this family's current tool
-            # (its index is untouched since the last time it was used).
+            if label == "short":
+                state["class"] ^= 1
+            else:
+                state["type"] ^= 1
 
-            key = cycle[state[label]]
+            key = TOOL_GRID[(state["type"], state["class"])]
             send_key(key)
             print(
                 f"{time.strftime('%FT%T')} Button 2 {label} press ({duration:.2f}s) -> sent '{key}'",
                 flush=True,
             )
-            state["last_family"] = label
 
 
 def main():
-    state = {"short": 0, "long": 0, "last_family": None}
+    state = {"type": 0, "class": 0}
     while True:
         path = find_device_path()
         if path is None:

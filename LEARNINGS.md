@@ -180,6 +180,44 @@ would be a cleaner single point of truth than a name that's now
 technically inaccurate. Not worth doing for a two-button swap; would be
 worth doing before a third.
 
+## 5.3 Replacing family-memory cycles with an orthogonal type/class grid
+
+The short/long-press-with-family-memory design (5.1) worked but had a
+usability wrinkle the user ran into in practice: switching families (e.g.
+long press after a run of short presses) resumed "whatever that family was
+last on," which meant the tool you landed on after a long press wasn't
+predictable from the short-press activity alone — you had to remember each
+family's hidden state.
+
+**New model, requested directly**: short presses should always do the same
+thing (flip draw↔erase-analog) *regardless* of which family you're
+currently in, and long presses should always flip the family
+(pen-family↔highlight-family) while preserving whichever draw/erase state
+you were in. This reframes the four tools as a 2x2 grid instead of two
+independent 2-item cycles:
+
+|            | class 0 (normal) | class 1 (alt) |
+|------------|-------------------|----------------|
+| type 0 (pen)       | `p` | `e` |
+| type 1 (highlight) | `h` | `l` |
+
+State collapsed from `{short_idx, long_idx, last_family}` to just
+`{type, class}` (two bits) — short press does `class ^= 1`, long press does
+`type ^= 1`. This is strictly simpler than the family-memory version *and*
+matches the new requirement, since "flip only one axis, unconditionally" is
+a much easier mental model than "remember, per family, where you left off."
+`TOOL_GRID` (dict keyed by `(type, class)`) replaced `SHORT_CYCLE`/
+`LONG_CYCLE`.
+
+**Learning**: the family-memory design in 5.1 was the right fix for the bug
+described there (index silently advancing), but was solving a different
+problem than what the user actually wanted long-term — a two-axis toggle is
+simpler than two path-dependent cycles once the actual requirement (short =
+class swap, long = type swap, always) was stated explicitly. Worth noticing
+when a "fix the bug in the current model" pass and a "the model itself
+should change" request arrive close together — they're not the same kind of
+change, and the latter can make the former's careful bugfix moot.
+
 ## 6. General workflow notes
 
 - Every persistence layer (`.xprofile`, `wacom-watch.service`) was

@@ -14,9 +14,10 @@ Actual button layout on this device (confirmed via `xsetwacom --get`/`xinput`):
 - **Button 1** = pen tip (draw/click) — never remapped.
 - **Button 2** = lower barrel button (easier to reach) → disabled in
   xsetwacom (`0`); a daemon reads the raw press/release events instead and
-  runs two independent cycles based on press duration: a **short press**
-  alternates `p` (pen) ↔ `e` (eraser), a **long press** (≥0.35s) alternates
-  `h` (highlight) ↔ `l` (laser) (see below).
+  drives a 2x2 grid of tools — **type** (pen-family `p`/`e` vs
+  highlight-family `h`/`l`) x **class** (normal `p`/`h` vs alt `e`/`l`). A
+  **short press** flips class only (`p`↔`e`, `h`↔`l`), a **long press**
+  (≥0.35s) flips type only (`p`↔`h`, `e`↔`l`) — see below.
 - **Button 3** = upper barrel button → `pan` (click+drag to pan/scroll).
 
 Originally Button 2 was pan and Button 3 was the tool-switch daemon; swapped
@@ -45,7 +46,7 @@ pulling changes to this repo.
 | Runs on every login/reboot | `~/.xprofile` (sourced by GDM) | `xprofile-wacom-snippet.sh` (snippet only, not the whole file) |
 | Watches for tablet reconnect, reapplies Button 2/3 bindings | `~/.local/bin/wacom-watch.sh` (user systemd service, always running) | `wacom-watch.sh` |
 | Runs the watcher automatically | `~/.config/systemd/user/wacom-watch.service` | `wacom-watch.service` |
-| Short/long press on Button 2: toggles pen/eraser, or highlight/laser | `~/.local/bin/wacom-button3-toggle.py` (user systemd service, always running; filename kept from the original Button-3 version) | `wacom-button3-toggle.py` |
+| Short/long press on Button 2: short flips tool class, long flips tool type | `~/.local/bin/wacom-button3-toggle.py` (user systemd service, always running; filename kept from the original Button-3 version) | `wacom-button3-toggle.py` |
 | Runs the toggle daemon automatically | `~/.config/systemd/user/wacom-button3-toggle.service` | `wacom-button3-toggle.service` |
 
 Superseded (kept for reference only, **not installed/used**): `wacom-apply-buttons.sh` +
@@ -56,13 +57,13 @@ Replaced by `wacom-watch.service` below, which needs no root at all.
 
 1. **Login/reboot**: `.xprofile` runs `xsetwacom --set ... Button 2 0` and `xsetwacom --set ... Button 3 "pan"` directly — X is already up by the time it runs.
 2. **Hot-plug** (tablet unplugged/replugged mid-session — this actually happened and is why the button briefly stopped panning): `wacom-watch.service` runs continuously as a user systemd service, reading `udevadm monitor` (no root needed — udev events are readable by any user). On every `add` event it waits for the device to enumerate and reapplies both Button 2 and Button 3. It also applies once immediately on service start/login.
-3. **Button 2 short/long press**: `xsetwacom` has no concept of press-duration-dependent bindings — it only does fixed, stateless bindings. So Button 2 is disabled in xsetwacom entirely, and `wacom-button3-toggle.py` reads the tablet's raw evdev press (`value == 1`) and release (`value == 0`) events for `BTN_STYLUS` directly via `python-evdev`, and measures the time between them. Under `LONG_PRESS_THRESHOLD_S` (0.35s) it's a **short press** (family `SHORT_CYCLE = ["p", "e"]`, pen/eraser); at or above the threshold it's a **long press** (family `LONG_CYCLE = ["h", "l"]`, highlight/laser). Each family remembers which of its two tools is currently selected. Switching families (e.g. a long press right after a short one) just resumes whichever tool that family was last on — it does **not** advance. Alternating within a family (`p ↔ e` or `h ↔ l`) only happens when you press that same press-length twice in a row. The key is sent via `xdotool key` on release. It resolves the device through `/dev/input/by-id/usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse`, which stays stable across replugs even though the underlying `/dev/input/eventN` number changes. Runs as its own user systemd service (no root needed — `/dev/input/event*` for this device is group `input`, which the user is a member of). To change the keys/order/threshold, edit `SHORT_CYCLE`/`LONG_CYCLE`/`LONG_PRESS_THRESHOLD_S` in the script and run `systemctl --user restart wacom-button3-toggle.service`.
+3. **Button 2 short/long press**: `xsetwacom` has no concept of press-duration-dependent bindings — it only does fixed, stateless bindings. So Button 2 is disabled in xsetwacom entirely, and `wacom-button3-toggle.py` reads the tablet's raw evdev press (`value == 1`) and release (`value == 0`) events for `BTN_STYLUS` directly via `python-evdev`, and measures the time between them. The current tool is tracked as a `(type, class)` pair looked up in `TOOL_GRID`: type 0/1 = pen-family (`p`/`e`) vs highlight-family (`h`/`l`); class 0/1 = normal (`p`/`h`) vs alt (`e`/`l`). Under `LONG_PRESS_THRESHOLD_S` (0.35s) it's a **short press**, which flips `class` only — so it always toggles draw↔erase-analog (`p`↔`e` or `h`↔`l`) regardless of which type you're on. At or above the threshold it's a **long press**, which flips `type` only — so it always toggles pen-family↔highlight-family (`p`↔`h` or `e`↔`l`) while keeping the current class. The key is sent via `xdotool key` on release. It resolves the device through `/dev/input/by-id/usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse`, which stays stable across replugs even though the underlying `/dev/input/eventN` number changes. Runs as its own user systemd service (no root needed — `/dev/input/event*` for this device is group `input`, which the user is a member of). To change the keys/threshold, edit `TOOL_GRID`/`LONG_PRESS_THRESHOLD_S` in the script and run `systemctl --user restart wacom-button3-toggle.service`.
 
 ## Status
 
 - `.xprofile` edit: **applied** (Button 2 → disabled, Button 3 → pan).
 - `wacom-watch.service`: **enabled and running**. Starts automatically on every login, no manual step needed, no sudo required.
-- `wacom-button3-toggle.service`: **enabled and running**. Verified live via journalctl: short presses (~0.1s) toggle `p`/`e`, long presses (~0.4-0.8s) toggle `h`/`l`.
+- `wacom-button3-toggle.service`: **enabled and running**. Verified live via journalctl: short presses (~0.1s) flip class (`p`↔`e`, `h`↔`l`), long presses (~0.4-0.8s) flip type (`p`↔`h`, `e`↔`l`).
 
 ## Unrelated prior-session artifact (don't confuse with the above)
 
