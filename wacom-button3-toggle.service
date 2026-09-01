@@ -1,5 +1,5 @@
 [Unit]
-Description=Wacom stylus Button 2: short press toggles pen/eraser, long press toggles highlight/laser
+Description=Wacom stylus tool switching: Button 2 toggles writer/eraser, Button 3 tap cycles pencil/highlighter/laser (drag still pans)
 After=graphical-session.target
 
 [Service]

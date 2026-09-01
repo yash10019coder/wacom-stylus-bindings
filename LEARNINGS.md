@@ -218,6 +218,51 @@ when a "fix the bug in the current model" pass and a "the model itself
 should change" request arrive close together — they're not the same kind of
 change, and the latter can make the former's careful bugfix moot.
 
+## 5.4 Spreading tool switching across both barrel buttons
+
+Two things converged to trigger another redesign: (1) the user wanted the
+model to be "pencil and highlighter each have an eraser; eraser is one
+shared tool, not two separate `e`s" rather than the type/class grid in 5.3,
+and (2) separately, Button 3 was sitting idle except for pan — only Button 2
+was doing any tool switching, which meant one button carried the whole
+tool-switching workload.
+
+Landed on splitting the two concerns across the two buttons instead of
+overloading one:
+
+- **Button 2** — a single-purpose eraser toggle. Every press flips
+  eraser on/off for whichever writer category (pencil or highlighter) is
+  currently active. No duration-gating needed anymore since this button now
+  does exactly one thing. A press while laser is active is intentionally a
+  no-op, since "erase the laser" isn't a meaningful action.
+- **Button 3** — kept its native xsetwacom `pan` binding (hold+drag)
+  completely untouched, and the same daemon *additionally* listens to its
+  raw evdev events purely to detect a quick tap (release under
+  `LONG_PRESS_THRESHOLD_S` with no real drag). A tap advances a 3-item
+  category cycle: pencil → highlighter → laser → pencil ... This reuses the
+  duration-gating idea from 5.1 but repurposes it to distinguish
+  "tap" (a deliberate low-effort gesture) from "drag" (pan), rather than
+  distinguishing two press lengths on the same button.
+
+Key implementation point: Button 3's xsetwacom `pan` binding is *not*
+disabled — unlike Button 2, which has to be disabled in xsetwacom so the
+daemon can own it exclusively. Button 3 lets both xsetwacom (native pan) and
+the daemon (tap detection) observe the same physical button independently;
+they don't conflict because pan only visibly does anything when there's
+drag motion, and a tap has none.
+
+**Learning**: "which buttons are being fully utilized" is itself useful
+input, not just "what should this specific button do" — the earlier designs
+(5.1–5.3) kept iterating on Button 2 alone because that's the button the
+conversation happened to be about, but stepping back and asking "what's
+Button 3 actually doing besides pan" opened up a simpler overall design
+(one button = one clear action; the other = a dual-use gesture) instead of
+continuing to stack more state onto a single button. Also: this was
+implemented only after the user was asked (twice) to confirm the exact
+short/long-press semantics before writing any code — per explicit feedback
+after a prior change in this project shipped correctly but without that
+confirmation step first.
+
 ## 6. General workflow notes
 
 - Every persistence layer (`.xprofile`, `wacom-watch.service`) was
