@@ -1,5 +1,5 @@
 [Unit]
-Description=Wacom stylus tool switching: Button 2 toggles writer/eraser, Button 3 tap cycles pencil/highlighter/laser (drag still pans)
+Description=Wacom stylus tool switching: Button 2 toggles writer/eraser, Button 3 hover-tap cycles pencil/highlighter/laser (touch/movement pan untouched)
 After=graphical-session.target
 
 [Service]

@@ -20,9 +20,12 @@ Actual button layout on this device (confirmed via `xsetwacom --get`/`xinput`):
   anything.
 - **Button 3** = upper barrel button → still bound to `pan` in xsetwacom
   (click+drag to pan/scroll, unchanged), **and** watched by the same daemon
-  for quick taps (press+release under 0.35s, no drag): a tap cycles the tool
-  **category** — pencil → highlighter → laser → pencil ... Each writer
-  category remembers its own eraser state independently.
+  to classify each press as pan or tap: it's a pan if the pen touched the
+  tablet at any point during the hold, or if the cursor moved past a small
+  threshold (this tablet also supports hover-only panning); otherwise it's
+  a tap, which cycles the tool **category** — pencil → highlighter → laser
+  → pencil ... Each writer category remembers its own eraser state
+  independently.
 
 Both buttons carry tool switching now (previously only one did), so neither
 is overloaded: Button 2 = eraser toggle, Button 3 = category cycle (tap) +
@@ -51,7 +54,7 @@ pulling changes to this repo.
 | Runs on every login/reboot | `~/.xprofile` (sourced by GDM) | `xprofile-wacom-snippet.sh` (snippet only, not the whole file) |
 | Watches for tablet reconnect, reapplies Button 2/3 bindings | `~/.local/bin/wacom-watch.sh` (user systemd service, always running) | `wacom-watch.sh` |
 | Runs the watcher automatically | `~/.config/systemd/user/wacom-watch.service` | `wacom-watch.service` |
-| Button 2 toggles eraser; Button 3 tap cycles pencil/highlighter/laser (drag still pans) | `~/.local/bin/wacom-button3-toggle.py` (user systemd service, always running; filename kept from the original Button-3 version) | `wacom-button3-toggle.py` |
+| Button 2 toggles eraser; Button 3 tap (hover, no touch/movement) cycles pencil/highlighter/laser, pan (touch or movement) untouched | `~/.local/bin/wacom-button3-toggle.py` (user systemd service, always running; filename kept from the original Button-3 version) | `wacom-button3-toggle.py` |
 | Runs the toggle daemon automatically | `~/.config/systemd/user/wacom-button3-toggle.service` | `wacom-button3-toggle.service` |
 
 Superseded (kept for reference only, **not installed/used**): `wacom-apply-buttons.sh` +
@@ -62,13 +65,17 @@ Replaced by `wacom-watch.service` below, which needs no root at all.
 
 1. **Login/reboot**: `.xprofile` runs `xsetwacom --set ... Button 2 0` and `xsetwacom --set ... Button 3 "pan"` directly — X is already up by the time it runs.
 2. **Hot-plug** (tablet unplugged/replugged mid-session — this actually happened and is why the button briefly stopped panning): `wacom-watch.service` runs continuously as a user systemd service, reading `udevadm monitor` (no root needed — udev events are readable by any user). On every `add` event it waits for the device to enumerate and reapplies both Button 2 and Button 3. It also applies once immediately on service start/login.
-3. **Button 2 + Button 3 tool switching**: `xsetwacom` has no concept of stateful or duration-dependent bindings — only fixed, stateless ones. So Button 2 is disabled in xsetwacom entirely, and `wacom-button3-toggle.py` reads the tablet's raw evdev press/release events for both `BTN_STYLUS` (Button 2) and `BTN_STYLUS2` (Button 3) directly via `python-evdev`. State is a `cat_idx` (which of `CATEGORIES = ["pencil", "highlighter", "laser"]` is active) plus a per-writer-category `erase` flag. **Button 2**: every press flips the `erase` flag for the current category and sends the resulting key (`p`/`h` when off, `e` when on) — a no-op while `laser` is the active category, since there's no eraser variant of it. **Button 3**: xsetwacom keeps its native `pan` binding on this button (drag still pans, untouched), and the daemon separately measures each press/release duration — under `LONG_PRESS_THRESHOLD_S` (0.35s) with no real drag, it's a **tap**, which advances `cat_idx` to the next category (wrapping) and sends that category's key; at/above the threshold it's treated as a drag and the daemon does nothing (xsetwacom's native pan already handled it). Keys are sent via `xdotool key` on release. The device is resolved through `/dev/input/by-id/usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse`, stable across replugs even though the underlying `/dev/input/eventN` number changes. Runs as its own user systemd service (no root needed — `/dev/input/event*` for this device is group `input`, which the user is a member of). To change the keys/order/threshold, edit `CATEGORIES`/`WRITER_KEYS`/`LONG_PRESS_THRESHOLD_S` in the script and run `systemctl --user restart wacom-button3-toggle.service`.
+3. **Button 2 + Button 3 tool switching**: `xsetwacom` has no concept of stateful or duration-dependent bindings — only fixed, stateless ones. So Button 2 is disabled in xsetwacom entirely, and `wacom-button3-toggle.py` reads the tablet's raw evdev press/release events for `BTN_STYLUS` (Button 2), `BTN_STYLUS2` (Button 3), `BTN_TOUCH`, and `ABS_X`/`ABS_Y` directly via `python-evdev`. State is a `cat_idx` (which of `CATEGORIES = ["pencil", "highlighter", "laser"]` is active) plus a per-writer-category `erase` flag. **Button 2**: every press flips the `erase` flag for the current category and sends the resulting key (`p`/`h` when off, `e` when on) — a no-op while `laser` is the active category, since there's no eraser variant of it.
+
+   **Button 3**: xsetwacom keeps its native `pan` binding on this button (drag still pans, untouched), and the daemon separately classifies each press as pan or tap on release. It's a **pan** if any of these are true: the pen touched the tablet (`BTN_TOUCH`) at any point during the hold — checked across the whole hold, not just the press instant, since the real gesture is button-down *then* touch-down, not the other way around; the cursor moved past `MOVE_THRESHOLD_UNITS` (device units, `ABS_X`/`ABS_Y` deltas) during the hold — this tablet also supports panning purely by hovering and dragging without ever touching down, so touch state alone misses those; or the press started within `PAN_DEBOUNCE_S` of the previous press being classified as pan — a single continuous pan gesture is chopped by the driver into repeated short stroke segments, each with its own real button release+re-press, and in that tens-of-ms gap the pen is briefly and genuinely hovering before the next stroke's touch-down, which is indistinguishable from a real tap by state alone. Anything not classified as pan is a **tap**, which advances `cat_idx` to the next category (wrapping) and sends that category's key. Duration alone was tried first and dropped — a fast short pan looks just like a tap by duration.
+
+   Keys are sent via `xdotool key` on release. The device is resolved through `/dev/input/by-id/usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse`, stable across replugs even though the underlying `/dev/input/eventN` number changes. Runs as its own user systemd service (no root needed — `/dev/input/event*` for this device is group `input`, which the user is a member of). To change the keys/order/thresholds, edit `CATEGORIES`/`WRITER_KEYS`/`PAN_DEBOUNCE_S`/`MOVE_THRESHOLD_UNITS` in the script and run `systemctl --user restart wacom-button3-toggle.service`.
 
 ## Status
 
 - `.xprofile` edit: **applied** (Button 2 → disabled, Button 3 → pan).
 - `wacom-watch.service`: **enabled and running**. Starts automatically on every login, no manual step needed, no sudo required.
-- `wacom-button3-toggle.service`: **enabled and running**. Verified live via journalctl: Button 2 toggles eraser (ignored on laser), Button 3 taps cycle pencil → highlighter → laser, Button 3 drag still pans.
+- `wacom-button3-toggle.service`: **enabled and running**. Verified live via journalctl and hands-on testing: Button 2 toggles eraser (ignored on laser), Button 3 hover-taps cycle pencil → highlighter → laser, and both touch-drag and hover-drag pans are correctly left alone (touch, movement, and debounce all confirmed working across real usage).
 
 ## Unrelated prior-session artifact (don't confuse with the above)
 

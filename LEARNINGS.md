@@ -263,6 +263,65 @@ short/long-press semantics before writing any code — per explicit feedback
 after a prior change in this project shipped correctly but without that
 confirmation step first.
 
+## 5.5 Button 3 tap-vs-pan: duration → touch → touch+movement+debounce
+
+Shipping 5.4 surfaced a real usability bug: panning with Button 3 kept
+misfiring as tool-switch taps. Diagnosing it required several rounds of
+live evdev capture rather than guessing, and each hypothesis was wrong in
+an instructive way:
+
+1. **Duration alone** (`LONG_PRESS_THRESHOLD_S`, from 5.4): fast pan
+   strokes (0.15–0.30s) are indistinguishable from deliberate taps by
+   duration. Raw journalctl output showed real pans logged as sub-threshold
+   "taps."
+2. **Relative movement** (`EV_REL`): this device is a tablet, not a mouse —
+   it reports `EV_ABS` (`ABS_X`/`ABS_Y`), not `EV_REL`. The daemon compiled
+   and ran but the movement counter was always 0, silently disabling the
+   check. **Lesson: verify a device's actual capabilities
+   (`InputDevice.capabilities()`) before writing detection logic against
+   assumed event types — don't infer them from what "seems right" for a
+   pointer device.**
+3. **Touch state at press instant** (`BTN_TOUCH`): assumed panning meant
+   "touching + dragging," so classified by whether `BTN_TOUCH` was down at
+   the moment `BTN_STYLUS2` was pressed. Wrong for two independent reasons,
+   both only visible from a raw event trace:
+   - The real gesture order is **button down, then touch down** — touch
+     hadn't started yet at the instant of the press, so every real pan
+     read as "not touching."
+   - The tablet also supports **hover-only panning** (drag while the pen
+     never touches the surface at all) — confirmed by the user directly
+     ("no you are wrong, panning is done when I touch... and scroll" led to
+     a live capture that showed *both* touch-drag and hover-drag pans
+     happening in the same session). Touch state genuinely cannot
+     distinguish these on this hardware.
+   - A third wrinkle: one continuous pan gesture is chopped by the driver
+     into repeated short stroke segments, each its own `BTN_STYLUS2`
+     up/down pair — real button release+re-press *mid-pan*, tens of
+     milliseconds apart, during which the pen is briefly and genuinely
+     hovering before the next stroke's touch-down. That gap is identical
+     to a real hover-tap from the daemon's point of view; it cannot be
+     resolved from state at the instant of the press.
+4. **Final design** (shipped): pan if *any* of — touched at any point
+   during the whole hold (not just at press instant); cursor moved past
+   `MOVE_THRESHOLD_UNITS` (device units at 100/mm, not screen pixels)
+   during the hold; or the press started within `PAN_DEBOUNCE_S` (0.2s) of
+   the previous press being classified as pan (stroke-boundary
+   continuation). Anything else is a tap. Verified against live
+   journalctl output showing correct classification for touch-drag pans,
+   hover-drag pans, stroke-boundary gaps, and genuine taps, then confirmed
+   by the user's own hands-on testing.
+
+**Process learning**: every one of the four iterations above was falsified
+by live raw-event capture (`evdev` read loops piped to a log file while
+the user performed the gesture in real time), not by reasoning about the
+hardware in the abstract — including one case where the user's own
+stated mental model of their gesture ("I touch and then scroll") was
+directly contradicted by the trace. Reproduce with instrumentation before
+trusting either a design assumption or a user's self-report of their own
+input pattern; neither is reliable alone for hardware event semantics.
+Each design change was proposed in prose and confirmed by the user before
+implementation, per [[feedback_confirm_before_implementing]].
+
 ## 6. General workflow notes
 
 - Every persistence layer (`.xprofile`, `wacom-watch.service`) was
