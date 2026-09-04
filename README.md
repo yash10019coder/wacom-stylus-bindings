@@ -25,9 +25,10 @@ Actual button layout on this device (confirmed via `xsetwacom --get`/`xinput`):
   threshold (this tablet also supports hover-only panning); otherwise it's
   a tap, which cycles the tool **category** — pencil → highlighter → laser
   → pencil ... Each writer category remembers its own eraser state
-  independently. **Triple-tapping** in the same spot (3 taps in quick
-  succession, same location) instead takes a screenshot of the secondary
-  monitor — see below — and does not cycle the category.
+  independently. **Holding Button 3 and tapping the pen tip on the tablet
+  3 times** in quick succession instead takes a screenshot of the
+  secondary monitor and pastes it into whatever has focus — see below —
+  without cycling the category or panning.
 
 Both buttons carry tool switching now (previously only one did), so neither
 is overloaded: Button 2 = eraser toggle, Button 3 = category cycle (tap) +
@@ -73,7 +74,7 @@ Replaced by `wacom-watch.service` below, which needs no root at all.
 
    Keys are sent via `xdotool key` on release. The device is resolved through `/dev/input/by-id/usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse`, stable across replugs even though the underlying `/dev/input/eventN` number changes. Runs as its own user systemd service (no root needed — `/dev/input/event*` for this device is group `input`, which the user is a member of). To change the keys/order/thresholds, edit `CATEGORIES`/`WRITER_KEYS`/`PAN_DEBOUNCE_S`/`MOVE_THRESHOLD_UNITS` in the script and run `systemctl --user restart wacom-button3-toggle.service`.
 
-4. **Triple-tap screenshot**: the daemon keeps the timestamp+position of the last 2 taps classified as taps (not pan). On a new tap, if it lands within `TRIPLE_TAP_WINDOW_S` (0.4s) of the previous tap, which itself landed within `TRIPLE_TAP_WINDOW_S` of the one before that, and all three are within `TRIPLE_TAP_RADIUS_UNITS` (150 device units, ~1.5mm) of the first tap's position, it's a triple-tap: the daemon shells out to `import -window root -crop <geometry>` (ImageMagick) to capture just the secondary monitor (`SCREENSHOT_MONITOR_GEOMETRY`, currently `1920x1080+0+0` for `HDMI-0` — update this if the monitor layout changes) and saves it to `SCREENSHOT_DIR` (`~/Pictures/wacom-screenshots/`) as `screenshot-<timestamp>.png`. The 3 taps that formed the triple-tap do not cycle the category (the tap history is cleared after firing, so category-cycling resumes fresh on the next tap).
+4. **Triple-tap screenshot**: while Button 3 is held down, each `BTN_TOUCH` down/up pulse on the tablet surface is checked — if it's short (`TAP_TOUCH_MAX_DURATION_S`, 0.3s) and doesn't move far (`TAP_TOUCH_MAX_MOVE_UNITS`, 100 device units), it counts as a tap pulse rather than the start of a drag. Once 3 such pulses land within `TRIPLE_TOUCH_WINDOW_S` (0.6s) of each other, it fires immediately (no need to release Button 3 first): the daemon shells out to `import -window root -crop <geometry>` (ImageMagick) to capture just the secondary monitor (`SCREENSHOT_MONITOR_GEOMETRY`, currently `1920x1080+0+0` for `HDMI-0` — update this if the monitor layout changes), saves it to `SCREENSHOT_DIR` (`~/Pictures/wacom-screenshots/`) as `screenshot-<timestamp>.png`, pipes it to `xclip -selection clipboard -t image/png` to put it on the clipboard, then sends `Ctrl+V` via `xdotool` to paste it into whatever has focus. A real touch-drag pan is one continuous touch (down once, move, up once), so it never produces 3 discrete pulses and isn't confused with this gesture. Once the triple-tap fires, that Button 3 press is fully consumed — its eventual release is not also evaluated as a pan/tap.
 
 ## Status
 
