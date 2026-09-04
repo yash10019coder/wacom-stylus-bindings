@@ -20,6 +20,11 @@
 #   A tap -> cycle the tool CATEGORY: pencil -> highlighter -> laser ->
 #   pencil ... Each writer category (pencil/highlighter) remembers its own
 #   eraser state across category switches.
+#
+#   Triple-tap in the same spot (3 taps, each within TRIPLE_TAP_WINDOW_S of
+#   the previous one and within TRIPLE_TAP_RADIUS_UNITS of the first tap's
+#   position) instead screenshots the secondary monitor to
+#   SCREENSHOT_DIR, and does NOT cycle the category for those 3 taps.
 #   Duration alone was tried first and proved unreliable - a fast short
 #   pan looks just like a tap by duration. Touch-only was tried next and
 #   missed hover-pans (see git history for both).
@@ -48,6 +53,15 @@ import evdev
 
 DEVICE_GLOB_NAME = "usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse"
 BY_ID_PATH = f"/dev/input/by-id/{DEVICE_GLOB_NAME}"
+
+# Secondary monitor geometry for triple-tap screenshots (xrandr WxH+X+Y).
+SCREENSHOT_MONITOR_GEOMETRY = "1920x1080+0+0"
+SCREENSHOT_DIR = os.path.expanduser("~/Pictures/wacom-screenshots")
+# 3 taps count as a triple-tap if each lands within this long of the
+# previous one, and within TRIPLE_TAP_RADIUS_UNITS of the first tap's
+# position.
+TRIPLE_TAP_WINDOW_S = 0.4
+TRIPLE_TAP_RADIUS_UNITS = 150
 
 # Category order for Button 3 taps. "pencil" and "highlighter" are writer
 # categories (each has its own eraser toggle via Button 2); "laser" has no
@@ -88,6 +102,34 @@ def send_key(key):
     subprocess.run(["xdotool", "key", key], check=False)
 
 
+def take_screenshot():
+    os.environ.setdefault("DISPLAY", ":1")
+    os.environ.setdefault("XAUTHORITY", "/run/user/1000/gdm/Xauthority")
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    filename = time.strftime("screenshot-%Y-%m-%dT%H-%M-%S.png")
+    path = os.path.join(SCREENSHOT_DIR, filename)
+    subprocess.run(
+        ["import", "-window", "root", "-crop", SCREENSHOT_MONITOR_GEOMETRY, path],
+        check=False,
+    )
+    return path
+
+
+def is_triple_tap(tap_history, pos):
+    """tap_history holds the (timestamp, pos) of the last 2 taps classified
+    as taps (not pan). Returns True if this tap plus those 2 form a
+    triple-tap in the same spot within the timing window."""
+    if len(tap_history) < 2:
+        return False
+    (ts0, pos0), (ts1, _pos1) = tap_history[-2], tap_history[-1]
+    now = time.time()
+    if now - ts1 > TRIPLE_TAP_WINDOW_S or ts1 - ts0 > TRIPLE_TAP_WINDOW_S:
+        return False
+    dx = abs(pos[0] - pos0[0]) if pos[0] is not None and pos0[0] is not None else 0
+    dy = abs(pos[1] - pos0[1]) if pos[1] is not None and pos0[1] is not None else 0
+    return max(dx, dy) <= TRIPLE_TAP_RADIUS_UNITS
+
+
 def watch(path, state):
     dev = evdev.InputDevice(path)
     press_times = {}
@@ -97,21 +139,25 @@ def watch(path, state):
     stylus2_start_pos = {}
     stylus2_move_units = 0.0
     last_pan_end_ts = None
+    last_abs_pos = {evdev.ecodes.ABS_X: None, evdev.ecodes.ABS_Y: None}
+    tap_history = []  # last 2 taps: [(timestamp, (x, y)), ...]
     for event in dev.read_loop():
         if event.type == evdev.ecodes.EV_KEY and event.code == evdev.ecodes.BTN_TOUCH:
             if event.value == 1 and stylus2_held:
                 stylus2_touched = True
             continue
 
-        if event.type == evdev.ecodes.EV_ABS and stylus2_held:
+        if event.type == evdev.ecodes.EV_ABS:
             if event.code in (evdev.ecodes.ABS_X, evdev.ecodes.ABS_Y):
-                start = stylus2_start_pos.get(event.code)
-                if start is None:
-                    stylus2_start_pos[event.code] = event.value
-                else:
-                    stylus2_move_units = max(
-                        stylus2_move_units, abs(event.value - start)
-                    )
+                last_abs_pos[event.code] = event.value
+                if stylus2_held:
+                    start = stylus2_start_pos.get(event.code)
+                    if start is None:
+                        stylus2_start_pos[event.code] = event.value
+                    else:
+                        stylus2_move_units = max(
+                            stylus2_move_units, abs(event.value - start)
+                        )
             continue
 
         if event.type != evdev.ecodes.EV_KEY:
@@ -182,6 +228,19 @@ def watch(path, state):
                     flush=True,
                 )
                 continue
+            pos = (last_abs_pos[evdev.ecodes.ABS_X], last_abs_pos[evdev.ecodes.ABS_Y])
+            if is_triple_tap(tap_history, pos):
+                tap_history.clear()
+                shot_path = take_screenshot()
+                print(
+                    f"{time.strftime('%FT%T')} Button 3 press ({duration:.2f}s, hovering) "
+                    f"-> triple-tap, screenshot saved to {shot_path}",
+                    flush=True,
+                )
+                continue
+            tap_history.append((time.time(), pos))
+            if len(tap_history) > 2:
+                tap_history.pop(0)
             state["cat_idx"] = (state["cat_idx"] + 1) % len(CATEGORIES)
             key = key_for_state(state)
             send_key(key)

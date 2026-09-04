@@ -25,7 +25,9 @@ Actual button layout on this device (confirmed via `xsetwacom --get`/`xinput`):
   threshold (this tablet also supports hover-only panning); otherwise it's
   a tap, which cycles the tool **category** — pencil → highlighter → laser
   → pencil ... Each writer category remembers its own eraser state
-  independently.
+  independently. **Triple-tapping** in the same spot (3 taps in quick
+  succession, same location) instead takes a screenshot of the secondary
+  monitor — see below — and does not cycle the category.
 
 Both buttons carry tool switching now (previously only one did), so neither
 is overloaded: Button 2 = eraser toggle, Button 3 = category cycle (tap) +
@@ -70,6 +72,8 @@ Replaced by `wacom-watch.service` below, which needs no root at all.
    **Button 3**: xsetwacom keeps its native `pan` binding on this button (drag still pans, untouched), and the daemon separately classifies each press as pan or tap on release. It's a **pan** if any of these are true: the pen touched the tablet (`BTN_TOUCH`) at any point during the hold — checked across the whole hold, not just the press instant, since the real gesture is button-down *then* touch-down, not the other way around; the cursor moved past `MOVE_THRESHOLD_UNITS` (device units, `ABS_X`/`ABS_Y` deltas) during the hold — this tablet also supports panning purely by hovering and dragging without ever touching down, so touch state alone misses those; or the press started within `PAN_DEBOUNCE_S` of the previous press being classified as pan — a single continuous pan gesture is chopped by the driver into repeated short stroke segments, each with its own real button release+re-press, and in that tens-of-ms gap the pen is briefly and genuinely hovering before the next stroke's touch-down, which is indistinguishable from a real tap by state alone. Anything not classified as pan is a **tap**, which advances `cat_idx` to the next category (wrapping) and sends that category's key. Duration alone was tried first and dropped — a fast short pan looks just like a tap by duration.
 
    Keys are sent via `xdotool key` on release. The device is resolved through `/dev/input/by-id/usb-Wacom_Co._Ltd._CTL-672_5GA00M1000190-event-mouse`, stable across replugs even though the underlying `/dev/input/eventN` number changes. Runs as its own user systemd service (no root needed — `/dev/input/event*` for this device is group `input`, which the user is a member of). To change the keys/order/thresholds, edit `CATEGORIES`/`WRITER_KEYS`/`PAN_DEBOUNCE_S`/`MOVE_THRESHOLD_UNITS` in the script and run `systemctl --user restart wacom-button3-toggle.service`.
+
+4. **Triple-tap screenshot**: the daemon keeps the timestamp+position of the last 2 taps classified as taps (not pan). On a new tap, if it lands within `TRIPLE_TAP_WINDOW_S` (0.4s) of the previous tap, which itself landed within `TRIPLE_TAP_WINDOW_S` of the one before that, and all three are within `TRIPLE_TAP_RADIUS_UNITS` (150 device units, ~1.5mm) of the first tap's position, it's a triple-tap: the daemon shells out to `import -window root -crop <geometry>` (ImageMagick) to capture just the secondary monitor (`SCREENSHOT_MONITOR_GEOMETRY`, currently `1920x1080+0+0` for `HDMI-0` — update this if the monitor layout changes) and saves it to `SCREENSHOT_DIR` (`~/Pictures/wacom-screenshots/`) as `screenshot-<timestamp>.png`. The 3 taps that formed the triple-tap do not cycle the category (the tap history is cleared after firing, so category-cycling resumes fresh on the next tap).
 
 ## Status
 
