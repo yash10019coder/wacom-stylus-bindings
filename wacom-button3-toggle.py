@@ -2,10 +2,21 @@
 # Wacom stylus: both barrel buttons now carry tool-switching, split so no
 # single button is overloaded.
 #
-# Button 2 (BTN_STYLUS, lower barrel) - eraser toggle: every press flips
-# between the current writer tool (pencil `p` or highlighter `h`) and the
-# shared eraser `e`. No-op while the laser is selected - erasing a laser
-# pointer doesn't mean anything.
+# Button 2 (BTN_STYLUS, lower barrel) - dual purpose, split by press
+# duration (a press is judged once, on release, as one or the other, never
+# both):
+#   - short press (< LONG_PRESS_THRESHOLD_S): eraser toggle - flips between
+#     the current writer tool (pencil `p` or highlighter `h`) and the
+#     shared eraser `e`. No-op while the laser is selected - erasing a
+#     laser pointer doesn't mean anything.
+#   - long press (>= LONG_PRESS_THRESHOLD_S): swap directly between pencil
+#     and highlighter (skipping laser), always landing on the plain writer
+#     key - it does NOT preserve or restore either category's eraser
+#     state, and does NOT toggle eraser itself. If laser is currently
+#     selected, it jumps to whichever of pencil/highlighter was last
+#     active (state["last_writer"]). LONG_PRESS_THRESHOLD_S=0.2s was
+#     chosen from real eraser-toggle press durations, which cluster well
+#     under 0.15s.
 #
 # Button 3 (BTN_STYLUS2, upper barrel) - dual purpose, kept working
 # alongside xsetwacom's native `pan` binding. Classified as pan if EITHER
@@ -17,9 +28,12 @@
 #     during the hold - this tablet also supports panning purely by
 #     hovering and dragging without ever touching down, which touch state
 #     alone can't see.
-#   A tap -> cycle the tool CATEGORY: pencil -> highlighter -> laser ->
-#   pencil ... Each writer category (pencil/highlighter) remembers its own
-#   eraser state across category switches.
+#   A tap -> toggle laser pointer: if the current category isn't laser, jump
+#   to laser (`l`); if it already is laser, jump back to whichever of
+#   pencil/highlighter was last active (state["last_writer"], the same
+#   tracking Button 2's long-press uses). Each writer category
+#   (pencil/highlighter) remembers its own eraser state independently, and
+#   that state is preserved across the round trip through laser.
 #
 #   While Button 3 is HELD, tapping the pen tip on the tablet surface 3
 #   times in quick succession (3 distinct BTN_TOUCH down/up pulses, each
@@ -75,6 +89,10 @@ TRIPLE_TOUCH_WINDOW_S = 0.6
 # eraser pair.
 CATEGORIES = ["pencil", "highlighter", "laser"]
 WRITER_KEYS = {"pencil": "p", "highlighter": "h"}
+WRITER_SWAP = {"pencil": "highlighter", "highlighter": "pencil"}
+# Button 2 press duration cutoff between eraser toggle (short) and
+# pencil/highlighter swap (long).
+LONG_PRESS_THRESHOLD_S = 0.2
 # A Button 3 press starting within this long of the previous press being
 # classified as pan is treated as a continuation of that same pan gesture.
 PAN_DEBOUNCE_S = 0.2
@@ -242,6 +260,17 @@ def watch(path, state):
 
         if event.code == evdev.ecodes.BTN_STYLUS:
             cat = CATEGORIES[state["cat_idx"]]
+            if duration >= LONG_PRESS_THRESHOLD_S:
+                target = WRITER_SWAP[cat] if cat in WRITER_SWAP else state["last_writer"]
+                state["cat_idx"] = CATEGORIES.index(target)
+                state["last_writer"] = target
+                key = WRITER_KEYS[target]
+                send_key(key)
+                print(
+                    f"{time.strftime('%FT%T')} Button 2 long press ({duration:.2f}s) -> swapped to '{target}', sent '{key}'",
+                    flush=True,
+                )
+                continue
             if cat == "laser":
                 print(
                     f"{time.strftime('%FT%T')} Button 2 press ({duration:.2f}s) -> ignored (laser has no eraser)",
@@ -273,18 +302,24 @@ def watch(path, state):
                     flush=True,
                 )
                 continue
-            state["cat_idx"] = (state["cat_idx"] + 1) % len(CATEGORIES)
+            cur_cat = CATEGORIES[state["cat_idx"]]
+            target = state["last_writer"] if cur_cat == "laser" else "laser"
+            state["cat_idx"] = CATEGORIES.index(target)
             key = key_for_state(state)
             send_key(key)
             print(
                 f"{time.strftime('%FT%T')} Button 3 press ({duration:.2f}s, hovering, "
-                f"moved {moved:.0f}u) -> category '{CATEGORIES[state['cat_idx']]}', sent '{key}'",
+                f"moved {moved:.0f}u) -> toggled to '{target}', sent '{key}'",
                 flush=True,
             )
 
 
 def main():
-    state = {"cat_idx": 0, "erase": {"pencil": False, "highlighter": False}}
+    state = {
+        "cat_idx": 0,
+        "erase": {"pencil": False, "highlighter": False},
+        "last_writer": "pencil",
+    }
     while True:
         path = find_device_path()
         if path is None:
