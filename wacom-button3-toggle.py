@@ -64,8 +64,23 @@
 # driver doesn't also fire its own click on the same press. Button 3 is left
 # bound to `pan` in xsetwacom - this daemon only listens alongside it to
 # detect taps, it doesn't disable or replace the native pan behavior.
+#
+# Auto-focus-follow-writing: ANY event from the tablet (hover movement,
+# touch, either barrel button) counts as "writing activity". Doesn't track
+# window titles/IDs at all (an earlier version matched GoodNotes by window
+# title, which broke whenever the actual open tab/window title didn't
+# contain "GoodNotes"). Instead it just relies on Alt+Tab's own MRU
+# (most-recently-used) window switching: the first activity event after
+# being idle sends Alt+Tab once (jumps to whatever window was used right
+# before you tabbed away to draw - presumed to be GoodNotes, since that's
+# the window you'd have alt-tabbed away FROM). A background thread watches
+# for WRITING_IDLE_TIMEOUT_S of no further tablet activity; when it fires,
+# it sends Alt+Tab again, which - because the WM's MRU list now has the
+# pre-writing window one step back - swaps back to it. Symmetric single
+# Alt+Tab in, single Alt+Tab out.
 import os
 import subprocess
+import threading
 import time
 
 import evdev
@@ -100,6 +115,10 @@ PAN_DEBOUNCE_S = 0.2
 # range), not screen pixels - 300 units is ~3mm of stylus movement.
 MOVE_THRESHOLD_UNITS = 300
 
+# Seconds of no tablet activity (hover/touch/buttons) before auto-focus
+# alt+tabs back to whatever window was active before writing started.
+WRITING_IDLE_TIMEOUT_S = 3.0
+
 
 def key_for_state(state):
     cat = CATEGORIES[state["cat_idx"]]
@@ -125,6 +144,43 @@ def send_key(key):
     os.environ.setdefault("DISPLAY", ":1")
     os.environ.setdefault("XAUTHORITY", "/run/user/1000/gdm/Xauthority")
     subprocess.run(["xdotool", "key", key], check=False)
+
+
+def _xdotool(*args):
+    os.environ.setdefault("DISPLAY", ":1")
+    os.environ.setdefault("XAUTHORITY", "/run/user/1000/gdm/Xauthority")
+    result = subprocess.run(
+        ["xdotool", *args], check=False, capture_output=True, text=True
+    )
+    return result.stdout.strip()
+
+
+def alt_tab():
+    _xdotool("key", "alt+Tab")
+
+
+def note_writing_activity(state):
+    """Call on every tablet event. The first event after being idle sends
+    one Alt+Tab (swap to the previously-used window); every event after
+    that until the idle watcher fires is a no-op."""
+    state["last_activity_ts"] = time.time()
+    if state["writing_active"]:
+        return
+    state["writing_active"] = True
+    print(f"{time.strftime('%FT%T')} writing started -> alt+tab", flush=True)
+    alt_tab()
+
+
+def idle_watcher(state):
+    while True:
+        time.sleep(0.5)
+        if not state["writing_active"]:
+            continue
+        if time.time() - state["last_activity_ts"] < WRITING_IDLE_TIMEOUT_S:
+            continue
+        state["writing_active"] = False
+        print(f"{time.strftime('%FT%T')} idle timeout -> alt+tab back", flush=True)
+        alt_tab()
 
 
 def screenshot_and_paste():
@@ -163,6 +219,9 @@ def watch(path, state):
     tap_pulses = []  # timestamps of recent short taps while Button 3 held
     triple_touch_fired = False
     for event in dev.read_loop():
+        if event.type in (evdev.ecodes.EV_KEY, evdev.ecodes.EV_ABS):
+            note_writing_activity(state)
+
         if event.type == evdev.ecodes.EV_KEY and event.code == evdev.ecodes.BTN_TOUCH:
             if event.value == 1:
                 if stylus2_held:
@@ -319,7 +378,10 @@ def main():
         "cat_idx": 0,
         "erase": {"pencil": False, "highlighter": False},
         "last_writer": "pencil",
+        "writing_active": False,
+        "last_activity_ts": 0.0,
     }
+    threading.Thread(target=idle_watcher, args=(state,), daemon=True).start()
     while True:
         path = find_device_path()
         if path is None:
